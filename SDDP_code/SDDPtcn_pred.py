@@ -167,41 +167,32 @@ def use_tcn1(df, h, retrain):
 def train_and_predict_tcn_for_column(h, data_column, time_index, retrain, column_name, target_column,
                                      num_channels=[16, 32], kernel_size=2, dropout=0.2,
                                      epochs=100, batch_size=32, learning_rate=0.001):
+    
     """
     Train or load a TCN model for a single variable and perform prediction for time T+h for the extraction task.
 
-    Parameters:
-        h (int): Forecasting horizon (number of steps ahead to predict).
-        data_column (pd.Series): The variable to be extracted.
-        time_index (pd.Index): Time index used to align the predictions.
-        retrain (bool): Whether to retrain the model or load it from checkpoint.
-        column_name (str): Name of the input variable (used for checkpointing).
-        target_column (pd.Series): Supervised target variable for training.
-
-    Returns:
-        pd.Series: Predicted values indexed by aligned time.
+    Modified version: includes early stopping (patience=5)
     """
+
     predictions = []
     column_name = str(column_name)
     data_column = data_column.values.astype(np.float32).reshape(-1, 1)
     target_column = target_column.values.astype(np.float32)
 
     # Define model save path
-    model_save_dir = os.path.join(current_script_dir, '..', 'checkpoints', f'SDDPtcn{an}_{args.dataset}_temp')
+    model_save_dir = os.path.join(current_script_dir, '..', 'checkpoints', f'SDDPdeepar{an}_{args.dataset}_temp')
     model_save_dir = os.path.abspath(model_save_dir)
     os.makedirs(model_save_dir, exist_ok=True)
-
-    os.makedirs(model_save_dir, exist_ok=True)
-    model_path = os.path.join(model_save_dir, f"tcn_{column_name}.pth")
+    model_path = os.path.join(model_save_dir, f"deepar_{column_name}.pth")
 
     # Define TCN model
     input_size = 1
     model = TCNTimeSeriesModel(
-    input_channels=input_size,
-    tcn_channels=num_channels,
-    output_size=1,
-    kernel_size=kernel_size,
-    dropout=dropout
+        input_channels=input_size,
+        tcn_channels=num_channels,
+        output_size=1,
+        kernel_size=kernel_size,
+        dropout=dropout
     )
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -229,6 +220,12 @@ def train_and_predict_tcn_for_column(h, data_column, time_index, retrain, column
         dataset = TensorDataset(input_data, target)
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
+        # Early stopping parameters
+        patience = 5
+        best_loss = float('inf')
+        no_improve = 0
+        best_state_dict = None
+
         # Train the model
         for epoch in range(epochs):
             model.train()
@@ -241,7 +238,23 @@ def train_and_predict_tcn_for_column(h, data_column, time_index, retrain, column
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
-            print(f"Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss / len(dataloader):.4f}")
+
+            epoch_loss /= len(dataloader)
+            print(f"Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.4f}")
+
+            # Early stopping check
+            if epoch_loss < best_loss - 1e-8:
+                best_loss = epoch_loss
+                no_improve = 0
+                best_state_dict = model.state_dict()
+            else:
+                no_improve += 1
+                if no_improve >= patience:
+                    print(f"Early stopping triggered at epoch {epoch + 1}. Best Loss: {best_loss:.4f}")
+                    break
+
+        if best_state_dict is not None:
+            model.load_state_dict(best_state_dict)
 
         # Save model parameters
         torch.save(model.state_dict(), model_path)
