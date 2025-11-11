@@ -347,7 +347,7 @@ def compute_loadings_tcn(df):
     print(f"Number of common factors (eigenvalues > 1): {num_common_factors}")
 
     # Perform PCA and compute loading matrix B
-    pca = PCA(n_components=min(num_common_factors, 6))
+    pca = PCA(n_components=min(num_common_factors, 7))
     pca.fit(feature_df)
     B = pca.components_.T @ np.diag(np.sqrt(pca.explained_variance_))
     return B
